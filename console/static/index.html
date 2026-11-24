@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ShopLite · Incident Copilot</title>
+<style>
+  :root { --bg:#0a0a0a; --panel:#141414; --line:#2a2a2a; --ink:#f2f2f2; --muted:#9a9a9a; --dim:#6a6a6a;
+          --bad:#ff6b5e; --ok:#5fd38d; --warn:#f2c14e; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font: 14px/1.45 Inter, -apple-system, system-ui, sans-serif; }
+  header { display:flex; align-items:center; gap:16px; padding:14px 24px; border-bottom:1px solid var(--line); }
+  header h1 { font-size:16px; margin:0; font-weight:650; letter-spacing:.2px; }
+  .pill { font-size:12px; padding:3px 10px; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
+  .pill.alert { color:var(--bad); border-color:var(--bad); }
+  .pill.ok { color:var(--ok); border-color:#2c5a3f; }
+  main { display:grid; grid-template-columns: 380px 1fr; gap:20px; padding:20px 24px; max-width:1400px; }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px 18px; margin-bottom:20px; }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.8px; color:var(--muted); margin:0 0 12px; font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-variant-numeric: tabular-nums; }
+  td, th { padding:6px 4px; border-bottom:1px solid var(--line); text-align:left; font-size:13px; }
+  th { color:var(--dim); font-weight:500; font-size:12px; }
+  .num { text-align:right; }
+  .bad { color:var(--bad); } .ok { color:var(--ok); } .muted { color:var(--muted); } .dim { color:var(--dim); }
+  button { font:inherit; font-size:13px; color:var(--ink); background:#1d1d1d; border:1px solid var(--line);
+           border-radius:7px; padding:7px 12px; cursor:pointer; }
+  button:hover:not(:disabled) { border-color:#555; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  button.primary { background:var(--ink); color:#0a0a0a; border-color:var(--ink); font-weight:600; }
+  button.approve { background:var(--ok); color:#06150c; border-color:var(--ok); font-weight:600; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; }
+  .alert-box { border-color:var(--bad); }
+  .big { font-size:20px; font-weight:650; margin:2px 0 4px; }
+  ul { margin:8px 0 0; padding-left:18px; } li { margin:3px 0; color:#d6d6d6; }
+  .kv { display:grid; grid-template-columns: 110px 1fr; gap:4px 12px; font-size:13px; }
+  .action { border:1px solid var(--line); border-radius:8px; padding:12px; margin-top:10px; }
+  .action.pending { border-color:var(--warn); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12.5px; }
+  .error { color:var(--bad); font-size:13px; margin-top:8px; }
+  .small { font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ShopLite · Incident Copilot</h1>
+  <span id="status" class="pill">loading…</span>
+  <span class="dim small" style="margin-left:auto">Simulated shop with live synthetic traffic</span>
+</header>
+<main>
+  <div>
+    <section>
+      <h2>Service health · last 8 s</h2>
+      <table><thead><tr><th>Service</th><th>Version</th><th class="num">Req</th><th class="num">Errors</th><th class="num">p95</th></tr></thead>
+        <tbody id="health"></tbody></table>
+      <div class="dim small" id="flags" style="margin-top:10px"></div>
+    </section>
+    <section>
+      <h2>Recent deploys</h2>
+      <table><tbody id="deploys"></tbody></table>
+    </section>
+    <section>
+      <h2>Break something (demo)</h2>
+      <div class="row">
+        <button onclick="brk('bad_deploy_orders')">Bad orders deploy</button>
+        <button onclick="brk('bad_deploy_gateway')">Bad gateway deploy</button>
+        <button onclick="brk('database_outage')">Database outage</button>
+        <button onclick="brk('slow_dependency')">Slow payments</button>
+        <button onclick="brk('pool_exhaustion')">Connection leak</button>
+        <button onclick="brk('harmless_deploy')">Harmless deploy (decoy)</button>
+      </div>
+      <div class="row" style="margin-top:10px"><button onclick="post('/api/reset')">Reset everything</button></div>
+    </section>
+  </div>
+  <div>
+    <section id="alertSec">
+      <h2>Alert</h2>
+      <div id="alert"></div>
+      <div class="row" style="margin-top:12px">
+        <button class="primary" id="btnRules" onclick="investigate('rules')">Investigate (rules)</button>
+        <button id="btnAi" onclick="investigate('ai')">Investigate with Claude</button>
+      </div>
+      <div id="invError" class="error"></div>
+    </section>
+    <section>
+      <h2>Diagnosis</h2>
+      <div id="report" class="muted">No investigation yet.</div>
+    </section>
+    <section>
+      <h2>Proposed actions · nothing runs until you approve</h2>
+      <div id="actions" class="muted">No proposals yet.</div>
+    </section>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const pct = x => (x * 100).toFixed(0) + '%';
+const ago = (ts, now) => { const s = Math.max(0, Math.round(now - ts)); return s < 60 ? s + 's ago' : Math.round(s/60) + 'm ago'; };
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+async function post(url) {
+  const r = await fetch(url, {method: 'POST'});
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.detail || r.statusText);
+  return body;
+}
+async function brk(what) { await post('/api/break/' + what); refresh(); }
+async function investigate(engine) {
+  $('invError').textContent = ''; $('btnRules').disabled = $('btnAi').disabled = true;
+  $('report').innerHTML = '<span class="muted">Investigating…</span>';
+  try { await post('/api/investigate/' + engine); } catch (e) { $('invError').textContent = e.message; }
+  refresh();
+}
+async function decide(id, d) {
+  try { await post(`/api/actions/${id}/${d}`); } catch (e) { alert(e.message); }
+  refresh();
+}
+
+function render(s) {
+  const a = s.alert;
+  $('status').textContent = a ? 'ALERT' : 'Healthy';
+  $('status').className = 'pill ' + (a ? 'alert' : 'ok');
+  $('alertSec').className = a ? 'alert-box' : '';
+  $('health').innerHTML = Object.entries(s.health).map(([svc, h]) => `<tr><td>${svc}</td>
+    <td class="mono dim">${s.versions[svc]}</td><td class="num">${h.requests}</td>
+    <td class="num ${h.error_rate > 0.02 ? 'bad' : ''}">${pct(h.error_rate)}</td>
+    <td class="num">${Math.round(h.p95_ms)} ms</td></tr>`).join('');
+  const flags = Object.entries(s.flags).map(([k, v]) => `${k}: ${v ? 'on' : 'off'}`).join(' · ');
+  $('flags').textContent = 'Flags: ' + flags;
+  $('deploys').innerHTML = s.deploys.length ? s.deploys.map(d => `<tr><td>${esc(d.service)}</td>
+    <td class="mono">${esc(d.from_version)} → ${esc(d.to_version)}</td><td class="dim small">${esc(d.author)}</td>
+    <td class="dim small num">${ago(d.at, s.now)}</td></tr>`).join('') : '<tr><td class="dim">None yet</td></tr>';
+
+  $('alert').innerHTML = a ? `<div class="big bad">${esc(a.summary)}</div>
+      <div class="muted small">${esc(a.rule)} on ${esc(a.service)} · fired ${ago(a.fired_at, s.now)}</div>`
+    : `<div class="muted">No active alert. ${s.history.length ? 'Last resolved: ' + esc(s.history[0].summary)
+       + ', ' + ago(s.history[0].resolved_at, s.now) : 'Use "Break something" to start an incident.'}</div>`;
+  $('btnRules').disabled = !a;
+  $('btnAi').disabled = !a || !s.ai_available;
+  $('btnAi').title = s.ai_available ? '' : 'Needs ANTHROPIC_API_KEY in .env (or use Claude Desktop via MCP)';
+
+  const r = s.report;
+  $('report').innerHTML = r ? `<div class="kv">
+      <span class="dim">Cause</span><span><b>${esc(r.cause)}</b> in <b>${esc(r.component)}</b></span>
+      <span class="dim">Summary</span><span>${esc(r.summary)}</span>
+      <span class="dim">Engine</span><span class="muted">${esc(r.engine)} · ${r.tool_calls} tool calls · ${r.seconds}s</span></div>
+      ${r.evidence && r.evidence.length ? '<ul>' + r.evidence.map(e => `<li>${esc(e)}</li>`).join('') + '</ul>' : ''}`
+    : '<span class="muted">No investigation yet.</span>';
+
+  $('actions').innerHTML = s.actions.length ? s.actions.map(x => {
+    const v = x.verification || {};
+    const ver = x.status === 'executed' ? (v.status === 'recovered' ? `<span class="ok">Recovered</span> · gateway errors ${pct(v.error_rate)}`
+        : v.status === 'not_recovered' ? `<span class="bad">Still failing</span> · gateway errors ${pct(v.error_rate)} · investigate again`
+        : '<span class="muted">Checking recovery…</span>') : '';
+    const buttons = x.status === 'pending_approval' ? `<div class="row" style="margin-top:10px">
+        <button class="approve" onclick="decide(${x.id}, 'approve')">Approve and run</button>
+        <button onclick="decide(${x.id}, 'reject')">Reject</button></div>` : '';
+    return `<div class="action ${x.status === 'pending_approval' ? 'pending' : ''}">
+      <div><b class="mono">${esc(x.action)} ${esc(x.target)}</b>
+        <span class="dim small"> · #${x.id} · by ${esc(x.proposed_by)} · ${esc(x.status.replace('_', ' '))}</span></div>
+      <div class="muted small" style="margin-top:4px">${esc(x.reason || x.refusal || '')}</div>
+      ${x.result ? `<div class="small" style="margin-top:4px">${esc(x.result)}</div>` : ''}
+      ${ver ? `<div class="small" style="margin-top:4px">${ver}</div>` : ''}${buttons}</div>`;
+  }).join('') : '<span class="muted">No proposals yet.</span>';
+}
+
+async function refresh() {
+  try { render(await (await fetch('/api/state')).json()); }
+  catch (e) { $('status').textContent = 'console offline'; }
+}
+refresh(); setInterval(refresh, 1500);
+</script>
+</body>
+</html>
