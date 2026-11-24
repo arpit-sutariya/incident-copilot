@@ -4,14 +4,12 @@ An on-call assistant for a small online shop. When an alert fires, it investigat
 
 The shop (**ShopLite**) is simulated, but the failures aren't faked. Each one is a real broken code path or a real outage in a running service, with real errors in real logs.
 
----
-## Demo
-
+## Demo (100 sec)
 
 https://github.com/user-attachments/assets/8b0fd44b-1115-4b6e-9ace-fd7962fe80c1
 
-
 ---
+
 ## The problem
 
 When something breaks at 3am, on-call engineers spend most of the time *finding* the cause:
