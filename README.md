@@ -4,12 +4,14 @@ An on-call assistant for a small online shop. When an alert fires, it investigat
 
 The shop (**ShopLite**) is simulated, but the failures aren't faked. Each one is a real broken code path or a real outage in a running service, with real errors in real logs.
 
-![A wrong fix caught by verification](docs/screenshots/wrong-fix-caught.png)
+---
+## Demo
 
-*Above: the rule-based copilot rolled back a harmless deploy instead of the bad one. Verification caught it ("Still failing"), so nobody walks away thinking it's fixed.*
+
+https://github.com/user-attachments/assets/8b0fd44b-1115-4b6e-9ace-fd7962fe80c1
+
 
 ---
-
 ## The problem
 
 When something breaks at 3am, on-call engineers spend most of the time *finding* the cause:
